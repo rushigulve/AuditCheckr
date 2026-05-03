@@ -15,13 +15,23 @@ PATH_A     = r"C:\path\to\document_v1.docx"
 PATH_B     = r"C:\path\to\document_v2.docx"
 OUTPUT_DIR = r"C:\path\to\reports"
 
+# Set to True if the documents are in Word "review mode" (tracked changes
+# visible). Replicates Word's behaviour of hiding Show Markup → Insertions
+# and Deletions: accepted insertions are kept, deleted text is dropped.
+STRIP_REVIEW_MARKUP = False
+
 # ── Run ───────────────────────────────────────────────────────────────────────
 
 bytes_a = open(PATH_A, "rb").read()
 bytes_b = open(PATH_B, "rb").read()
 
-doc_a = extractor.extract(bytes_a, source_id=PATH_A)
-doc_b = extractor.extract(bytes_b, source_id=PATH_B)
+doc_a = extractor.extract(bytes_a, source_id=PATH_A, strip_review_markup=STRIP_REVIEW_MARKUP)
+doc_b = extractor.extract(bytes_b, source_id=PATH_B, strip_review_markup=STRIP_REVIEW_MARKUP)
+
+if STRIP_REVIEW_MARKUP:
+    print("[mode] Review markup stripped — comparing accepted/final text")
+else:
+    print("[mode] Standard extraction — comparing raw document text")
 
 print(f"Doc A: {len(doc_a.blocks)} blocks")
 print(f"Doc B: {len(doc_b.blocks)} blocks")

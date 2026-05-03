@@ -6,6 +6,19 @@ beyond python-docx (which bundles lxml). Footnotes and Endnotes are
 read directly from word/footnotes.xml and word/endnotes.xml inside
 the docx ZIP, then mapped to their host paragraphs via
 w:footnoteReference / w:endnoteReference elements.
+
+strip_review_markup mode
+────────────────────────
+Legal documents are often in "review mode" — they contain tracked changes
+(<w:ins> insertions and <w:del> deletions) that are visible in Word's
+"Show Markup" view.  When strip_review_markup=True the extractor replicates
+What MS Word does when you turn off Show Markup → Insertions and Deletions:
+
+  • Text inside <w:ins> (insertions) is KEPT   → accepted
+  • Text inside <w:del> (deletions)  is DROPPED → rejected
+  • Formatting change elements (<w:rPrChange>, <w:pPrChange>) are ignored
+
+This gives you the clean "final accepted" text for comparison.
 """
 from __future__ import annotations
 
@@ -25,9 +38,43 @@ _W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 # ── Low-level helpers ─────────────────────────────────────────────────────────
 
+_DEL_TAG = f"{{{_W}}}del"
+_T_TAG   = f"{{{_W}}}t"
+
+
 def _para_text(para) -> str:
     """Full text of a paragraph including text inside hyperlinks."""
     return "".join(run.text for run in para.runs)
+
+
+def _para_text_accepted(para) -> str:
+    """
+    Extract paragraph text treating all tracked changes as accepted:
+      - Include <w:t> inside <w:ins>  (accepted insertions)
+      - Exclude <w:t> inside <w:del>  (rejected deletions)
+
+    Uses raw lxml iteration so it works regardless of nesting depth.
+    Falls back to _para_text if no tracked changes are present (fast path).
+    """
+    p = para._p
+    # Fast path: no tracked changes in this paragraph
+    xml = p.xml if hasattr(p, 'xml') else ''
+    if f"{{{_W}}}del" not in xml and f"{{{_W}}}ins" not in xml:
+        return _para_text(para)
+
+    parts: list[str] = []
+    for elem in p.iter(_T_TAG):
+        # Walk ancestors to check if this <w:t> lives inside a <w:del>
+        ancestor = elem.getparent()
+        in_del = False
+        while ancestor is not None and ancestor is not p:
+            if ancestor.tag == _DEL_TAG:
+                in_del = True
+                break
+            ancestor = ancestor.getparent()
+        if not in_del and elem.text:
+            parts.append(elem.text)
+    return "".join(parts)
 
 
 def _notes_from_xml(
@@ -141,17 +188,25 @@ def _extract_note_references(
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def extract(docx_bytes: bytes, source_id: str) -> DocumentModel:
+def extract(
+    docx_bytes: bytes,
+    source_id: str,
+    strip_review_markup: bool = False,
+) -> DocumentModel:
     """
     Parse a .docx byte blob into a DocumentModel.
 
     Args:
-        docx_bytes: Raw bytes of the .docx file.
-        source_id:  Human-readable identifier (filename, URL, etc.).
+        docx_bytes:          Raw bytes of the .docx file.
+        source_id:           Human-readable identifier (filename, URL, etc.).
+        strip_review_markup: When True, accept all tracked changes before
+                             extracting text (include <w:ins>, drop <w:del>).
+                             Use this for documents in Word review/markup mode.
 
     Returns:
         A fully populated DocumentModel.
     """
+    get_text = _para_text_accepted if strip_review_markup else _para_text
     doc = Document(io.BytesIO(docx_bytes))
 
     # ── Gather all annotation maps ─────────────────────────────────────────
@@ -169,7 +224,7 @@ def extract(docx_bytes: bytes, source_id: str) -> DocumentModel:
     idx = 0
 
     for i, para in enumerate(doc.paragraphs):
-        text = _para_text(para).strip()
+        text = get_text(para).strip()
         if not text:
             continue
 
@@ -195,7 +250,7 @@ def extract(docx_bytes: bytes, source_id: str) -> DocumentModel:
         for row in table.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
-                    text = _para_text(para).strip()
+                    text = get_text(para).strip()
                     if not text:
                         continue
                     blocks.append(ContentBlock(
