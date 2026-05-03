@@ -309,16 +309,19 @@ class HtmlReporter(ReporterBase):
         else:
             badge = '<span class="badge badge-clean">✓ Documents Match</span>'
 
-        html = _TEMPLATE.format(
-            source_a   = _esc(result.source_a_id),
-            source_b   = _esc(result.source_b_id),
-            badge      = badge,
-            total      = result.total_changes,
-            inserts    = inserts,
-            deletes    = deletes,
-            replaces   = replaces,
-            ann_changes= ann_ch,
-            rows       = _render_rows(result.chunks),
+        src_a = _esc(result.source_a_id)
+        src_b = _esc(result.source_b_id)
+        html = (
+            _TEMPLATE
+            .replace("{source_a}",   src_a)
+            .replace("{source_b}",   src_b)
+            .replace("{badge}",      badge)
+            .replace("{total}",      str(result.total_changes))
+            .replace("{inserts}",    str(inserts))
+            .replace("{deletes}",    str(deletes))
+            .replace("{replaces}",   str(replaces))
+            .replace("{ann_changes}",str(ann_ch))
+            .replace("{rows}",       _render_rows(result.chunks))
         )
 
         out.write_text(html, encoding="utf-8")
