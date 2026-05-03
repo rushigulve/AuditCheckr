@@ -49,32 +49,42 @@ def _para_text(para) -> str:
 
 def _para_text_accepted(para) -> str:
     """
-    Extract paragraph text treating all tracked changes as accepted:
-      - Include <w:t> inside <w:ins>  (accepted insertions)
-      - Exclude <w:t> inside <w:del>  (rejected deletions)
+    Extract paragraph text with all tracked changes accepted:
+      - w:del nodes are removed entirely        (deleted text dropped)
+      - w:ins wrappers are unwrapped             (inserted text kept)
 
-    Uses raw lxml iteration so it works regardless of nesting depth.
-    Falls back to _para_text if no tracked changes are present (fast path).
+    Works on a deep copy of the paragraph XML so the live Document
+    object is never mutated.  Falls back to _para_text when no tracked
+    changes are present (fast path).
     """
+    from copy import deepcopy
+
     p = para._p
-    # Fast path: no tracked changes in this paragraph
-    xml = p.xml if hasattr(p, 'xml') else ''
-    if f"{{{_W}}}del" not in xml and f"{{{_W}}}ins" not in xml:
+
+    # Fast path: use etree.tostring which is always reliable
+    xml_str = etree.tostring(p, encoding="unicode")
+    if f"{{{_W}}}del" not in xml_str and f"{{{_W}}}ins" not in xml_str:
         return _para_text(para)
 
-    parts: list[str] = []
-    for elem in p.iter(_T_TAG):
-        # Walk ancestors to check if this <w:t> lives inside a <w:del>
-        ancestor = elem.getparent()
-        in_del = False
-        while ancestor is not None and ancestor is not p:
-            if ancestor.tag == _DEL_TAG:
-                in_del = True
-                break
-            ancestor = ancestor.getparent()
-        if not in_del and elem.text:
-            parts.append(elem.text)
-    return "".join(parts)
+    # Work on a copy — never mutate the live document
+    p_copy = deepcopy(p)
+    nsmap = {"w": _W}
+
+    # 1. Drop all deleted text
+    for del_node in p_copy.findall(".//w:del", namespaces=nsmap):
+        del_node.getparent().remove(del_node)
+
+    # 2. Unwrap w:ins — keep children, discard the wrapper element
+    for ins_node in p_copy.findall(".//w:ins", namespaces=nsmap):
+        parent = ins_node.getparent()
+        children = list(ins_node)          # list() — getchildren() is deprecated
+        idx = list(parent).index(ins_node)
+        for i, child in enumerate(children):
+            parent.insert(idx + i, child)
+        parent.remove(ins_node)
+
+    # 3. Collect all remaining w:t text
+    return "".join(t.text or "" for t in p_copy.findall(f".//{{{_W}}}t"))
 
 
 def _notes_from_xml(
