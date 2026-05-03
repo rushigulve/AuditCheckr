@@ -199,25 +199,54 @@ def _extract_note_references(
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def extract(
-    docx_bytes: bytes,
-    source_id: str,
+    source: "bytes | str",
+    source_id: str | None = None,
     strip_review_markup: bool = False,
 ) -> DocumentModel:
     """
-    Parse a .docx byte blob into a DocumentModel.
+    Parse a .docx file into a DocumentModel.
 
     Args:
-        docx_bytes:          Raw bytes of the .docx file.
-        source_id:           Human-readable identifier (filename, URL, etc.).
-        strip_review_markup: When True, accept all tracked changes before
-                             extracting text (include <w:ins>, drop <w:del>).
-                             Use this for documents in Word review/markup mode.
+        source:              File path (str/Path) OR raw .docx bytes.
+                             Passing a path is preferred — the library opens
+                             the file directly, no open() / BytesIO round-trip.
+        source_id:           Human-readable label used in reports.
+                             Defaults to str(source) if not provided.
+        strip_review_markup: When True, use docx-revisions to accept all
+                             tracked changes (insertions kept, deletions dropped)
+                             before extraction.
+                             Install:  pip install docx-revisions
 
     Returns:
         A fully populated DocumentModel.
     """
-    get_text = _para_text_accepted if strip_review_markup else _para_text
-    doc = Document(io.BytesIO(docx_bytes))
+    from pathlib import Path as _Path
+
+    if source_id is None:
+        source_id = str(source)
+
+    is_path = isinstance(source, (str, _Path))
+
+    # ── Load the document ──────────────────────────────────────────────────
+    if strip_review_markup:
+        try:
+            from docx_revisions import RevisionDocument
+        except ImportError:
+            raise ImportError(
+                "strip_review_markup=True requires 'docx-revisions'.\n"
+                "Install:  pip install docx-revisions"
+            )
+        # RevisionDocument accepts a path string or a file-like object
+        rdoc = RevisionDocument(source if is_path else io.BytesIO(source))
+        rdoc.accept_all()
+        doc = rdoc        # RevisionDocument exposes .paragraphs, .tables, etc.
+        get_text = _para_text   # doc is already clean after accept_all()
+    else:
+        doc = Document(source if is_path else io.BytesIO(source))
+        get_text = _para_text
+
+    # ── Raw bytes for footnote/endnote ZIP extraction ──────────────────────
+    docx_bytes = _Path(source).read_bytes() if is_path else source
 
     # ── Gather all annotation maps ─────────────────────────────────────────
     comments_map   = _extract_comments(doc)

@@ -32,15 +32,14 @@ DEBUG_INSPECT = True
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def inspect_raw(docx_bytes: bytes, label: str) -> None:
+def inspect_raw(path: str, label: str) -> None:
     """
     Print every paragraph exactly as python-docx reads it — before
-    our extractor logic runs. Use this to spot formatting noise or
-    tracked-change text that is leaking into the raw paragraphs.
+    our extractor logic runs.
     """
     import io
     from docx import Document
-    doc = Document(io.BytesIO(docx_bytes))
+    doc = Document(path)
     sep = "─" * 60
     print(f"\n{sep}")
     print(f"  RAW PARAGRAPHS — {label}")
@@ -76,15 +75,13 @@ def inspect(doc, label: str) -> None:
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 
-bytes_a = open(PATH_A, "rb").read()
-bytes_b = open(PATH_B, "rb").read()
-
 if DEBUG_INSPECT:
-    inspect_raw(bytes_a, f"Document A  →  {PATH_A}")
-    inspect_raw(bytes_b, f"Document B  →  {PATH_B}")
+    inspect_raw(PATH_A, f"Document A  →  {PATH_A}")
+    inspect_raw(PATH_B, f"Document B  →  {PATH_B}")
 
-doc_a = extractor.extract(bytes_a, source_id=PATH_A, strip_review_markup=STRIP_REVIEW_MARKUP)
-doc_b = extractor.extract(bytes_b, source_id=PATH_B, strip_review_markup=STRIP_REVIEW_MARKUP)
+# Pass paths directly — no open() / bytes round-trip needed
+doc_a = extractor.extract(PATH_A, strip_review_markup=STRIP_REVIEW_MARKUP)
+doc_b = extractor.extract(PATH_B, strip_review_markup=STRIP_REVIEW_MARKUP)
 
 if STRIP_REVIEW_MARKUP:
     print("[mode] Review markup stripped — comparing accepted/final text")
