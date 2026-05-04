@@ -30,6 +30,11 @@ STRIP_REVIEW_MARKUP = False
 # and checking if unwanted formatting noise is leaking through.
 DEBUG_INSPECT = True
 
+# Set to True to dump the full raw XML of every paragraph.
+# Use this when tips are not being detected — it shows exactly
+# what Word is storing in the file.
+DUMP_FULL_XML = False
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def inspect_raw(path: str, label: str) -> None:
@@ -52,6 +57,58 @@ def inspect_raw(path: str, label: str) -> None:
             print(f"  [{i:>3}] [{style:<22}] {raw}")
         else:
             print(f"  [{i:>3}] [{style:<22}] (empty)")
+    print(sep)
+
+
+def inspect_xml_tips(path: str) -> None:
+    """
+    Diagnostic: scan every paragraph for any element that looks like
+    an annotation or tip and print its raw XML.
+
+    This tells us EXACTLY what Word is storing so we can figure out
+    why tips are not being picked up.  Looks for:
+      - w:hyperlink           (ScreenTips live here as w:tooltip)
+      - w:commentReference    (Comments)
+      - w:footnoteReference / w:endnoteReference
+    If none found, and DUMP_FULL_XML=True, prints full XML of every paragraph.
+    """
+    from docx import Document
+    from docx.oxml.ns import qn
+    from lxml import etree
+
+    doc = Document(path)
+    sep = "-" * 60
+    TAGS = {
+        qn("w:hyperlink"), qn("w:commentReference"),
+        qn("w:footnoteReference"), qn("w:endnoteReference"),
+    }
+    found_any = False
+
+    print(f"\n{sep}")
+    print(f"  XML TIP DIAGNOSTIC  {path}")
+    print(sep)
+
+    for i, para in enumerate(doc.paragraphs):
+        hits = [elem for elem in para._p.iter() if elem.tag in TAGS]
+        if hits:
+            found_any = True
+            raw = "".join(r.text for r in para.runs)
+            print(f"\n  Para [{i}]: {raw[:80]!r}")
+            for elem in hits:
+                print(f"  TAG : {elem.tag}")
+                print(etree.tostring(elem, pretty_print=True).decode())
+
+    if not found_any:
+        print("\n  No hyperlinks/comments/footnotes found in body paragraphs.")
+        print("  Set DUMP_FULL_XML = True to see complete XML for all paragraphs.")
+
+    if DUMP_FULL_XML:
+        print(f"\n{sep}  FULL XML DUMP  {sep}")
+        for i, para in enumerate(doc.paragraphs):
+            raw = "".join(r.text for r in para.runs).strip()
+            if raw:
+                print(f"\n  Para [{i}]: {raw[:60]!r}")
+                print(etree.tostring(para._p, pretty_print=True).decode())
     print(sep)
 
 
@@ -78,6 +135,10 @@ def inspect(doc, label: str) -> None:
 if DEBUG_INSPECT:
     inspect_raw(PATH_A, f"Document A  →  {PATH_A}")
     inspect_raw(PATH_B, f"Document B  →  {PATH_B}")
+    # Scan for tips/hyperlinks/annotations in raw XML — use this to
+    # diagnose why tips are not showing up in extraction results.
+    inspect_xml_tips(PATH_A)
+    inspect_xml_tips(PATH_B)
 
 # Pass paths directly — no open() / bytes round-trip needed
 doc_a = extractor.extract(PATH_A, strip_review_markup=STRIP_REVIEW_MARKUP)
