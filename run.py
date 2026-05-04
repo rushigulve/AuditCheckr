@@ -35,7 +35,42 @@ DEBUG_INSPECT = True
 # what Word is storing in the file.
 DUMP_FULL_XML = False
 
+# Set to True to dump the /customXml/ folder from the docx ZIP.
+# Knowledge Coach tips are stored here, not in document.xml.
+# Run this once to see the structure, then we can write extraction code.
+DUMP_CUSTOM_XML = False
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def dump_custom_xml(path: str) -> None:
+    """
+    Dump every file in the /customXml/ folder inside the .docx ZIP.
+    Knowledge Coach stores its tip/guidance data here as proprietary XML.
+    Run with DUMP_CUSTOM_XML=True to see the raw structure.
+    """
+    import zipfile
+    from lxml import etree
+
+    sep = "=" * 60
+    print(f"\n{sep}")
+    print(f"  CUSTOM XML PARTS  —  {path}")
+    print(sep)
+
+    with zipfile.ZipFile(path, "r") as zf:
+        custom_files = [n for n in zf.namelist() if n.startswith("customXml/") and n.endswith(".xml")]
+        if not custom_files:
+            print("  No customXml/ files found in this document.")
+            print("  Tips may be stored elsewhere (e.g. word/document.xml SDTs).")
+        for fname in sorted(custom_files):
+            print(f"\n  ── File: {fname} ──")
+            raw = zf.read(fname)
+            try:
+                root = etree.fromstring(raw)
+                print(etree.tostring(root, pretty_print=True).decode())
+            except Exception:
+                print(raw.decode(errors="replace"))
+    print(sep)
+
 
 def inspect_raw(path: str, label: str) -> None:
     """
@@ -139,6 +174,10 @@ if DEBUG_INSPECT:
     # diagnose why tips are not showing up in extraction results.
     inspect_xml_tips(PATH_A)
     inspect_xml_tips(PATH_B)
+
+if DUMP_CUSTOM_XML:
+    dump_custom_xml(PATH_A)
+    dump_custom_xml(PATH_B)
 
 # Pass paths directly — no open() / bytes round-trip needed
 doc_a = extractor.extract(PATH_A, strip_review_markup=STRIP_REVIEW_MARKUP)
