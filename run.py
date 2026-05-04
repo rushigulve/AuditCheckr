@@ -40,6 +40,10 @@ DUMP_FULL_XML = False
 # Run this once to see the structure, then we can write extraction code.
 DUMP_CUSTOM_XML = False
 
+# Set to True to scan word/document.xml for all <w:sdt> Content Controls.
+# Tips invisible to para.runs (e.g. Knowledge Coach SDTs) will show here.
+DUMP_SDT = False
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def dump_custom_xml(path: str) -> None:
@@ -69,6 +73,64 @@ def dump_custom_xml(path: str) -> None:
                 print(etree.tostring(root, pretty_print=True).decode())
             except Exception:
                 print(raw.decode(errors="replace"))
+    print(sep)
+
+
+def dump_sdt_elements(path: str) -> None:
+    """
+    Read word/document.xml directly and print every <w:sdt> element.
+    Content Controls (SDTs) are invisible to para.runs — Knowledge Coach
+    tips that live in SDTs will appear here even if all other diagnostics
+    missed them.  Each entry shows the alias, tag, and visible text.
+    """
+    import zipfile
+    from lxml import etree
+
+    _W   = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    SDT  = f"{{{_W}}}sdt"
+    SDTP = f"{{{_W}}}sdtPr"
+    SDTC = f"{{{_W}}}sdtContent"
+    ALIAS = f"{{{_W}}}alias"
+    TAG   = f"{{{_W}}}tag"
+    W_VAL = f"{{{_W}}}val"
+
+    sep = "=" * 60
+    print(f"\n{sep}")
+    print(f"  CONTENT CONTROLS (w:sdt)  —  {path}")
+    print(sep)
+
+    with zipfile.ZipFile(path, "r") as zf:
+        raw = zf.read("word/document.xml")
+
+    root = etree.fromstring(raw)
+    sdts = root.findall(f".//{SDT}")
+    print(f"  Found {len(sdts)} SDT element(s).\n")
+
+    for i, sdt in enumerate(sdts):
+        pr = sdt.find(SDTP)
+        alias = tag = ""
+        if pr is not None:
+            a = pr.find(ALIAS)
+            t = pr.find(TAG)
+            if a is not None: alias = a.get(W_VAL, "")
+            if t is not None: tag   = t.get(W_VAL, "")
+
+        content_el = sdt.find(SDTC)
+        text = ""
+        if content_el is not None:
+            text = "".join(
+                (e.text or "") for e in content_el.iter(f"{{{_W}}}t")
+            ).strip()
+
+        print(f"  SDT [{i}]  alias={alias!r}  tag={tag!r}")
+        print(f"    text : {text[:200]!r}")
+        # Print full XML capped at 600 chars so output stays readable
+        full_xml = etree.tostring(sdt, pretty_print=True).decode()
+        print(f"    xml  :\n{full_xml[:600]}")
+        if len(full_xml) > 600:
+            print("    ... (truncated)")
+        print()
+
     print(sep)
 
 
@@ -178,6 +240,10 @@ if DEBUG_INSPECT:
 if DUMP_CUSTOM_XML:
     dump_custom_xml(PATH_A)
     dump_custom_xml(PATH_B)
+
+if DUMP_SDT:
+    dump_sdt_elements(PATH_A)
+    dump_sdt_elements(PATH_B)
 
 # Pass paths directly — no open() / bytes round-trip needed
 doc_a = extractor.extract(PATH_A, strip_review_markup=STRIP_REVIEW_MARKUP)
